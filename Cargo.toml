@@ -4,3 +4,26 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+libc = "0.2.189"
+
+
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+strip = "symbols"
+panic = "abort"
+
+
+# Security-relevant mistakes
+mem_forget = "deny"
+exit = "warn"
+dbg_macro = "deny"
+todo = "warn"
+unimplemented = "warn"
+
+# Maintainability
+large_stack_arrays = "warn"
+large_futures = "warn"
+needless_pass_by_value = "warn"
+redundant_clone = "deny"
