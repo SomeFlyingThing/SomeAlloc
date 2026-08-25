@@ -1,0 +1,34 @@
+unstable_features = true
+
+edition = "2024"
+style_edition = "2024"
+
+max_width = 200
+
+group_imports = "StdExternalCrate"
+imports_granularity = "Crate"
+reorder_imports = true
+reorder_modules = true
+
+match_block_trailing_comma = true
+
+# Format Rust examples inside /// documentation.
+format_code_in_doc_comments = true
+doc_comment_code_block_width = 120
+
+# Format both sides of macro_rules! definitions.
+format_macro_matchers = true
+format_macro_bodies = true
+
+# Turn #[doc = "..."] into normal /// comments.
+normalize_doc_attributes = true
+
+# Foo { value: value } -> Foo { value }
+use_field_init_shorthand = true
+
+# Old try!(expression) -> expression?
+use_try_shorthand = true
+
+# Reflow long comments.
+wrap_comments = true
+comment_width = 120
