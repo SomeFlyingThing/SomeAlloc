@@ -1,8 +1,6 @@
-use std::{intrinsics::black_box, ptr::NonNull};
+use std::ptr::NonNull;
 
-use libc::{SCHED_FLAG_KEEP_POLICY, mmap};
-
-use crate::block::{Block, map};
+use crate::block::{Block, allocate, map};
 
 mod block;
 
@@ -14,19 +12,14 @@ fn alloc(size: usize) -> *mut u8 {
     unsafe {
         static mut START: Option<NonNull<Block>> = None;
 
-        if START.is_none() {
+        let Some(start) = START else {
             let block = map(size);
 
             START = Some(block);
 
-            return START.unwrap().cast::<u8>().as_ptr();
-        } else {
-            let start = START.unwrap().read();
-            
-            
-        }
-    }
+            return Block::start_of_mem(block);
+        };
 
-    
-    
+        allocate(start, size).map_or(std::ptr::null_mut(), Block::start_of_mem)
+    }
 }

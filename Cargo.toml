@@ -14,15 +14,13 @@ lto = "fat"
 strip = "symbols"
 panic = "abort"
 
-
-# Security-relevant mistakes
+[lints.clippy]
 mem_forget = "deny"
 exit = "warn"
 dbg_macro = "deny"
 todo = "warn"
 unimplemented = "warn"
 
-# Maintainability
 large_stack_arrays = "warn"
 large_futures = "warn"
 needless_pass_by_value = "warn"
