@@ -5,7 +5,7 @@ fn free(begin_mem: *mut u8) -> Option<()> {
 
     let ptr = unsafe { ptr.sub(1) };
 
-    let mut block = unsafe { &mut *ptr };
+    let block = unsafe { &mut *ptr };
 
     block.free();
 
