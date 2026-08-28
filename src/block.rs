@@ -32,6 +32,7 @@ impl Block {
     pub const fn start_of_mem(block: NonNull<Self>) -> *mut u8 {
         unsafe { block.as_ptr().add(1).cast::<u8>() }
     }
+    
     #[inline]
     pub fn peek(&self) -> Option<&Block> {
         unsafe {
@@ -45,6 +46,11 @@ impl Block {
             let mut next = self.next?;
             Some(next.as_mut())
         }
+    }
+    
+    #[inline]
+    pub fn free(&mut self){
+        self.is_free = true;
     }
 }
 
@@ -243,3 +249,6 @@ fn return_origin_only_joins_adjacent_free_blocks() {
     assert_eq!(root.current_size, root.origin_size);
     assert!(root.next.is_none());
 }
+
+
+

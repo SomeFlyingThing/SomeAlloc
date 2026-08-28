@@ -2,6 +2,7 @@ use std::ptr::NonNull;
 
 use crate::block::{Block, allocate, map};
 
+mod free;
 mod block;
 
 fn main() {
