@@ -1,5 +1,7 @@
 use std::{
+    ffi::c_char,
     mem::{align_of, size_of},
+    os::raw::c_void,
     ptr::NonNull,
 };
 
@@ -32,7 +34,7 @@ impl Block {
     pub const fn start_of_mem(block: NonNull<Self>) -> *mut u8 {
         unsafe { block.as_ptr().add(1).cast::<u8>() }
     }
-    
+
     #[inline]
     pub fn peek(&self) -> Option<&Block> {
         unsafe {
@@ -47,9 +49,9 @@ impl Block {
             Some(next.as_mut())
         }
     }
-    
+
     #[inline]
-    pub fn free(&mut self){
+    pub fn free(&mut self) {
         self.is_free = true;
     }
 }
@@ -185,7 +187,41 @@ unsafe fn start_loop(start_block: NonNull<Block>, size: usize) -> Option<NonNull
         current_block = block.next?;
     }
 }
+pub fn map_n_zero(current_size: usize) -> NonNull<Block> {
+    let current_size = align_size(current_size);
+    let origin_size = current_size.checked_add(MORE).expect("allocation size overflow");
+    let mapped_size = size_of::<Block>().checked_add(origin_size).expect("allocation size overflow");
+    let ptr = unsafe { mmap(std::ptr::null_mut(), mapped_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) };
 
+    if ptr == MAP_FAILED {
+        panic!("map_failed")
+    }
+
+    let block_ptr = NonNull::new(ptr.cast::<Block>()).unwrap();
+    unsafe {
+        block_ptr.as_ptr().write(Block {
+            current_size: origin_size,
+            origin_size,
+
+            is_free: true,
+            next: None,
+        });
+
+        use_block(block_ptr, current_size);
+    };
+
+    zerod_block(block_ptr, current_size);
+
+    block_ptr
+}
+
+fn zerod_block(block: NonNull<Block>, size: usize) {
+    let mem = unsafe { block.add(1).cast::<u8>().as_ptr() };
+
+    unsafe {
+        std::ptr::write_bytes(mem, 0, size);
+    }
+}
 /// Searches a mapped block list for reusable memory.
 ///
 /// Safety
@@ -249,6 +285,3 @@ fn return_origin_only_joins_adjacent_free_blocks() {
     assert_eq!(root.current_size, root.origin_size);
     assert!(root.next.is_none());
 }
-
-
-
