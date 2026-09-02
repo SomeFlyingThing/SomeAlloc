@@ -3,6 +3,7 @@ use std::{
     mem::{align_of, size_of},
     os::raw::c_void,
     ptr::NonNull,
+    sync::Mutex,
 };
 
 use libc::{MAP_ANONYMOUS, MAP_FAILED, MAP_PRIVATE, PROT_READ, PROT_WRITE, mmap};
@@ -102,31 +103,18 @@ const fn align_size(size: usize) -> usize {
     }
 }
 
-static mut FIRST_FREE: Option<NonNull<Block>> = None;
+struct FreeList(Mutex<Option<NonNull<Block>>>);
 
-fn is_sec() -> bool {
-    unsafe {
-        let Some(_) = FIRST_FREE else {
-            return false;
-        };
-    }
-    true
-}
+unsafe impl Sync for FreeList {}
+
+static FIRST_FREE: FreeList = FreeList(Mutex::new(None));
 
 fn add_to_free_list(middle: &mut NonNull<Block>) {
     unsafe {
         middle.as_mut().is_free = true;
-
-        if !is_sec() {
-            middle.as_mut().next_free = None;
-            FIRST_FREE = Some(*middle);
-            return;
-        }
-
-        let mut first = FIRST_FREE.unwrap();
-
-        middle.as_mut().next_free = first.as_ref().next_free;
-        first.as_mut().next_free = Some(*middle);
+        let mut first = FIRST_FREE.0.lock().unwrap();
+        middle.as_mut().next_free = *first;
+        *first = Some(*middle);
     }
 }
 
@@ -206,8 +194,8 @@ unsafe fn return_origin(block_ptr: NonNull<Block>) {
             if joined_size > (*block).origin_size {
                 break;
             }
-
-            let mut current_free = FIRST_FREE;
+            let mut first = FIRST_FREE.0.lock().unwrap();
+            let mut current_free: Option<NonNull<Block>> = *first;
             let mut previous_free: Option<NonNull<Block>> = None;
 
             while let Some(current) = current_free {
@@ -217,7 +205,7 @@ unsafe fn return_origin(block_ptr: NonNull<Block>) {
                     if let Some(previous) = previous_free {
                         (*previous.as_ptr()).next_free = next_free;
                     } else {
-                        FIRST_FREE = next_free;
+                        *first = next_free;
                     }
 
                     break;
@@ -233,29 +221,44 @@ unsafe fn return_origin(block_ptr: NonNull<Block>) {
     }
 }
 
-unsafe fn start_loop(_start_block: NonNull<Block>, size: usize) -> Option<NonNull<Block>> {
+unsafe fn start_loop(start_block: NonNull<Block>, size: usize) -> Option<NonNull<Block>> {
     unsafe {
         let wanted_size = align_size(size);
-        let mut current = FIRST_FREE?;
-        let mut previous: Option<NonNull<Block>> = None;
+        let mut current = Some(start_block);
 
-        loop {
-            let block = current.as_ref();
+        while let Some(current_ptr) = current {
+            let block = current_ptr.as_ref();
 
-            if block.current_size >= wanted_size {
-                if let Some(mut prev) = previous {
-                    prev.as_mut().next_free = block.next_free;
-                } else {
-                    FIRST_FREE = block.next_free;
+            if block.is_free && block.current_size >= wanted_size {
+                {
+                    let mut first = FIRST_FREE.0.lock().unwrap();
+                    let mut free = *first;
+                    let mut previous: Option<NonNull<Block>> = None;
+
+                    while let Some(free_ptr) = free {
+                        if free_ptr == current_ptr {
+                            let next_free = (*free_ptr.as_ptr()).next_free;
+                            if let Some(previous) = previous {
+                                (*previous.as_ptr()).next_free = next_free;
+                            } else {
+                                *first = next_free;
+                            }
+                            break;
+                        }
+
+                        previous = Some(free_ptr);
+                        free = (*free_ptr.as_ptr()).next_free;
+                    }
                 }
 
-                use_block(current, wanted_size);
-                return Some(current);
+                use_block(current_ptr, wanted_size);
+                return Some(current_ptr);
             }
 
-            previous = Some(current);
-            current = block.next_free?;
+            current = block.next;
         }
+
+        None
     }
 }
 
