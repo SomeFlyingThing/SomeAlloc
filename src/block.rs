@@ -12,6 +12,7 @@ pub struct Block {
     origin_size: usize,
     is_free: bool,
     next: Option<NonNull<Block>>,
+    next_free: Option<NonNull<Block>>,
 }
 
 impl Block {
@@ -52,7 +53,12 @@ impl Block {
 
     #[inline]
     pub fn free(&mut self) {
-        self.is_free = true;
+        if self.is_free {
+            return;
+        }
+
+        let mut ptr = NonNull::from(self);
+        add_to_free_list(&mut ptr);
     }
 }
 
@@ -76,6 +82,7 @@ pub fn map(current_size: usize) -> NonNull<Block> {
 
             is_free: true,
             next: None,
+            next_free: None,
         });
 
         use_block(block_ptr, current_size);
@@ -92,6 +99,34 @@ const fn align_size(size: usize) -> usize {
         size
     } else {
         size.checked_add(alignment - remainder).expect("allocation size overflow")
+    }
+}
+
+static mut FIRST_FREE: Option<NonNull<Block>> = None;
+
+fn is_sec() -> bool {
+    unsafe {
+        let Some(_) = FIRST_FREE else {
+            return false;
+        };
+    }
+    true
+}
+
+fn add_to_free_list(middle: &mut NonNull<Block>) {
+    unsafe {
+        middle.as_mut().is_free = true;
+
+        if !is_sec() {
+            middle.as_mut().next_free = None;
+            FIRST_FREE = Some(*middle);
+            return;
+        }
+
+        let mut first = FIRST_FREE.unwrap();
+
+        middle.as_mut().next_free = first.as_ref().next_free;
+        first.as_mut().next_free = Some(*middle);
     }
 }
 
@@ -116,22 +151,25 @@ unsafe fn separate(wanted_size: usize, mut block_ptr: NonNull<Block>) -> bool {
 
     let old_next = block.next;
 
-    // Put the next header immediately after this block's usable memory.
-    let new_block_ptr = unsafe { Block::start_of_mem(block_ptr).add(wanted_size).cast::<Block>() };
-
     unsafe {
+        let new_block_ptr: *mut Block = Block::start_of_mem(block_ptr).add(wanted_size).cast();
+
         new_block_ptr.write(Block {
             current_size: rest,
             origin_size: rest,
             is_free: true,
             next: old_next,
+            next_free: None,
         });
+
+        let mut new_block = NonNull::new(new_block_ptr).unwrap();
+        add_to_free_list(&mut new_block);
+
+        block.current_size = wanted_size;
+        block.next = Some(new_block);
+
+        true
     }
-
-    block.current_size = wanted_size;
-    block.next = NonNull::new(new_block_ptr);
-
-    true
 }
 
 unsafe fn use_block(mut block_ptr: NonNull<Block>, wanted_size: usize) {
@@ -141,52 +179,86 @@ unsafe fn use_block(mut block_ptr: NonNull<Block>, wanted_size: usize) {
     }
 }
 
-unsafe fn return_origin(mut block_ptr: NonNull<Block>) {
-    let block = unsafe { block_ptr.as_mut() };
+unsafe fn return_origin(block_ptr: NonNull<Block>) {
+    unsafe {
+        let block = block_ptr.as_ptr();
 
-    if !block.is_free {
-        return;
-    }
-
-    while block.current_size < block.origin_size {
-        let Some(mut next_ptr) = block.next else {
-            break;
-        };
-        let next = unsafe { next_ptr.as_mut() };
-        let expected_next = Block::start_of_mem(block_ptr).wrapping_add(block.current_size).cast::<Block>();
-
-        if !next.is_free || next_ptr.as_ptr() != expected_next {
-            break;
+        if !(*block).is_free {
+            return;
         }
 
-        let Some(joined_size) = block.current_size.checked_add(size_of::<Block>()).and_then(|size| size.checked_add(next.current_size)) else {
-            break;
-        };
+        while (*block).current_size < (*block).origin_size {
+            let Some(next_ptr) = (*block).next else {
+                break;
+            };
 
-        if joined_size > block.origin_size {
-            break;
+            let next = next_ptr.as_ptr();
+            let expected_next = Block::start_of_mem(block_ptr).wrapping_add((*block).current_size).cast::<Block>();
+
+            if !(*next).is_free || next != expected_next {
+                break;
+            }
+
+            let Some(joined_size) = (*block).current_size.checked_add(size_of::<Block>()).and_then(|size| size.checked_add((*next).current_size)) else {
+                break;
+            };
+
+            if joined_size > (*block).origin_size {
+                break;
+            }
+
+            let mut current_free = FIRST_FREE;
+            let mut previous_free: Option<NonNull<Block>> = None;
+
+            while let Some(current) = current_free {
+                if current == next_ptr {
+                    let next_free = (*current.as_ptr()).next_free;
+
+                    if let Some(previous) = previous_free {
+                        (*previous.as_ptr()).next_free = next_free;
+                    } else {
+                        FIRST_FREE = next_free;
+                    }
+
+                    break;
+                }
+
+                previous_free = Some(current);
+                current_free = (*current.as_ptr()).next_free;
+            }
+
+            (*block).current_size = joined_size;
+            (*block).next = (*next).next;
         }
-
-        block.current_size = joined_size;
-        block.next = next.next;
     }
 }
 
-unsafe fn start_loop(start_block: NonNull<Block>, size: usize) -> Option<NonNull<Block>> {
-    let wanted_size = align_size(size);
-    let mut current_block = start_block;
+unsafe fn start_loop(_start_block: NonNull<Block>, size: usize) -> Option<NonNull<Block>> {
+    unsafe {
+        let wanted_size = align_size(size);
+        let mut current = FIRST_FREE?;
+        let mut previous: Option<NonNull<Block>> = None;
 
-    loop {
-        let block = unsafe { current_block.as_ref() };
+        loop {
+            let block = current.as_ref();
 
-        if block.is_free && block.current_size >= wanted_size {
-            unsafe { use_block(current_block, wanted_size) };
-            return Some(current_block);
+            if block.current_size >= wanted_size {
+                if let Some(mut prev) = previous {
+                    prev.as_mut().next_free = block.next_free;
+                } else {
+                    FIRST_FREE = block.next_free;
+                }
+
+                use_block(current, wanted_size);
+                return Some(current);
+            }
+
+            previous = Some(current);
+            current = block.next_free?;
         }
-
-        current_block = block.next?;
     }
 }
+
 pub fn map_n_zero(current_size: usize) -> NonNull<Block> {
     let current_size = align_size(current_size);
     let origin_size = current_size.checked_add(MORE).expect("allocation size overflow");
@@ -205,6 +277,7 @@ pub fn map_n_zero(current_size: usize) -> NonNull<Block> {
 
             is_free: true,
             next: None,
+            next_free: None,
         });
 
         use_block(block_ptr, current_size);
@@ -222,6 +295,7 @@ fn zerod_block(block: NonNull<Block>, size: usize) {
         std::ptr::write_bytes(mem, 0, size);
     }
 }
+
 /// Searches a mapped block list for reusable memory.
 ///
 /// Safety
@@ -234,7 +308,7 @@ pub unsafe fn allocate(start_block: NonNull<Block>, size: usize) -> Option<NonNu
 
 #[test]
 fn block_layout_matches_exp() {
-    assert_eq!(size_of::<Block>(), 32);
+    assert_eq!(size_of::<Block>(), 40);
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use crate::block::Block;
 
-fn free(begin_mem: *mut u8) -> Option<()> {
+pub fn free(begin_mem: *mut u8) -> Option<()> {
     let ptr = begin_mem.cast::<Block>();
 
     let ptr = unsafe { ptr.sub(1) };
@@ -9,6 +9,5 @@ fn free(begin_mem: *mut u8) -> Option<()> {
 
     block.free();
 
-    
     Some(())
 }

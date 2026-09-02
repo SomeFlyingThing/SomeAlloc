@@ -43,7 +43,7 @@ fn calloc(size: usize) -> *mut u8 {
 
 #[cfg(test)]
 mod test {
-    use std::ptr::{self, copy_nonoverlapping, slice_from_raw_parts};
+    use std::ptr::{self, copy_nonoverlapping};
 
     use super::*;
 
