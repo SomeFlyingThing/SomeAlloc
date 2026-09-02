@@ -309,6 +309,21 @@ pub unsafe fn allocate(start_block: NonNull<Block>, size: usize) -> Option<NonNu
     unsafe { start_loop(start_block, size) }
 }
 
+pub fn append_mapping(mut start: NonNull<Block>, new_mapping: NonNull<Block>) {
+    loop {
+        let next = unsafe { start.as_ref().next };
+        match next {
+            Some(next) => start = next,
+            None => {
+                unsafe {
+                    start.as_mut().next = Some(new_mapping);
+                }
+                return;
+            },
+        }
+    }
+}
+
 #[test]
 fn block_layout_matches_exp() {
     assert_eq!(size_of::<Block>(), 40);

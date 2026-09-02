@@ -1,6 +1,6 @@
 use std::ptr::NonNull;
 
-use crate::block::{Block, allocate, map, map_n_zero};
+use crate::block::{Block, allocate, append_mapping, map, map_n_zero};
 
 mod block;
 mod free;
@@ -21,7 +21,17 @@ fn alloc(size: usize) -> *mut u8 {
             return Block::start_of_mem(block);
         };
 
-        allocate(start, size).map_or(std::ptr::null_mut(), Block::start_of_mem)
+        loop {
+            let mut start = start;
+            match allocate(start, size) {
+                Some(ptr) => Block::start_of_mem(ptr),
+                None => {
+                    let new = map(size);
+                    append_mapping(start, new);
+                    Block::start_of_mem(new)
+                },
+            };
+        }
     }
 }
 
